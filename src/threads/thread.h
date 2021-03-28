@@ -90,6 +90,8 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
+    struct list_elem sleepelem;          /* List element for sleeping threads list. */
+    int64_t end_ticks;                  /* The time when the thread wakes up. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -119,6 +121,9 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);
 void thread_unblock (struct thread *);
+
+void thread_sleep_to(int64_t ent_ticks);
+void thread_wakeup(int64_t curticks);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);

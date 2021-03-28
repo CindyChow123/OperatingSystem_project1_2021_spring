@@ -28,6 +28,9 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/* List of sleeping threads. Processes that are put to sleep and waiting to be woke up. */
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -92,12 +95,14 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  list_init (&sleep_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  initial_thread->end_ticks = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -137,6 +142,7 @@ thread_tick (void)
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
+
 }
 
 /* Prints thread statistics. */
@@ -240,6 +246,41 @@ thread_unblock (struct thread *t)
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
+}
+
+/* Transition a running thread to the sleep-blocked state.*/
+void
+thread_sleep_to (int64_t end_ticks)
+{
+  struct thread *cur = thread_current();
+  cur->end_ticks = end_ticks;
+  // put thread into sleep list
+  list_push_back (&sleep_list, &cur->sleepelem);
+  // make the current thread sleep
+  thread_block();
+
+}
+
+/* Transition sleeping threads to ready-to-run status. */
+void
+thread_wakeup(int64_t curticks)
+{
+  struct list_elem *e;
+
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  for (e = list_begin (&sleep_list); e != list_end (&sleep_list);
+       e = list_next (e))
+    {
+      struct thread *t = list_entry (e, struct thread, sleepelem);
+      if (t->end_ticks <= curticks)
+      {
+        thread_unblock(t);
+        /* update data. */
+        t->end_ticks = 0;
+        list_remove(&t->sleepelem);
+      }
+    }
 }
 
 /* Returns the name of the running thread. */
