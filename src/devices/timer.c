@@ -60,7 +60,7 @@ timer_calibrate (void)
   /* Refine the next 8 bits of loops_per_tick. */
   high_bit = loops_per_tick;
   for (test_bit = high_bit >> 1; test_bit != high_bit >> 10; test_bit >>= 1)
-    if (!too_many_loops (loops_per_tick | test_bit))
+    if (!too_many_loops (high_bit | test_bit))
       loops_per_tick |= test_bit;
 
   printf ("%'"PRIu64" loops/s.\n", (uint64_t) loops_per_tick * TIMER_FREQ);
@@ -88,20 +88,16 @@ timer_elapsed (int64_t then)
    be turned on. */
 void
 timer_sleep (int64_t ticks) 
-{
-  int64_t start = timer_ticks ();
-
+{ 
+  if (ticks <= 0)
+  {
+    return;
+  }
   ASSERT (intr_get_level () == INTR_ON);
-  // while (timer_elapsed (start) < ticks)
-  // {
-  //   thread_yield();
-  // }
   enum intr_level old_level = intr_disable();
-
-  // put thread to sleep, block needs interrupts off
-  thread_sleep_to (start+ticks);
-
-  // turn on interrupts
+  struct thread *current = thread_current();
+  current->wake_up_ticks = ticks;
+  thread_block();
   intr_set_level(old_level);
 }
 
@@ -179,24 +175,23 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
-  if (thread_mlfqs&&ticks!=0)
-  {
-    thread_increment_rcpu();
-    if (ticks%TIMER_FREQ==0)
-    {
-      thread_recalculate_rcpu();
-    }
-    else if (ticks%4==0)
-    {
-      // enum intr_level old_level = intr_disable();
-      thread_update_priority_all();
-      // intr_set_level (old_level);
-    }
-  }
   ticks++;
+  enum intr_level old_level = intr_disable ();
+  thread_foreach (check_block_thread, NULL);
+  if (thread_mlfqs)
+  {
+    update_recent_cpu_by_one();
+    if (ticks % TIMER_FREQ == 0)
+    {
+      update_load_average();
+      update_recent_cpu_all();
+      update_priority_all();
+    }
+    if (ticks % 4 == 0)
+      update_priority(thread_current());
+  }
+  intr_set_level (old_level);
   thread_tick ();
-  /* Wake up sleeping threads. */
-  thread_wakeup(ticks);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
