@@ -95,6 +95,8 @@ struct thread
     int64_t end_ticks;                  /* The time when the thread wakes up. */
     struct list own_locks;              /* List of locks owned by the thread. */
     struct lock *desire_lock;           /* Point to lock that it is aquiring. */
+    int nice;                           /* Nice value of the thread. */
+    fixed_t recent_cpu;                 /* An estimate of the CPU time the thread has used recently. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -149,5 +151,9 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+void thread_update_priority(struct thread *t);
+void thread_update_priority_all(void);
+void thread_increment_rcpu(void);
+void thread_recalculate_rcpu(void);
 
 #endif /* threads/thread.h */

@@ -40,6 +40,9 @@ static struct thread *initial_thread;
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
 
+/* Load average system wide. */
+static fixed_t load_avg;
+
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
   {
@@ -67,7 +70,7 @@ static void kernel_thread (thread_func *, void *aux);
 static void idle (void *aux UNUSED);
 static struct thread *running_thread (void);
 static struct thread *next_thread_to_run (void);
-static void init_thread (struct thread *, const char *name, int priority);
+static void init_thread (struct thread *, const char *name, int priority, int nice);
 static bool is_thread (struct thread *) UNUSED;
 static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
@@ -99,10 +102,14 @@ thread_init (void)
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
-  init_thread (initial_thread, "main", PRI_DEFAULT);
+  init_thread (initial_thread, "main", PRI_DEFAULT,0);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
   initial_thread->end_ticks = 0;
+  // initial_thread->recent_cpu=0;
+
+  /* initial thread has nice=0. */
+  initial_thread->nice = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -114,6 +121,7 @@ thread_start (void)
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
+  load_avg = FP_CONST(0);
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
@@ -195,7 +203,8 @@ thread_create (const char *name, int priority,
     return TID_ERROR;
 
   /* Initialize thread. */
-  init_thread (t, name, priority);
+  /* Initial thread with nice=0; other inherite from their parent. */
+  init_thread (t, name, priority,thread_current()->nice);
   tid = t->tid = allocate_tid ();
 
   /* Stack frame for kernel_thread(). */
@@ -273,7 +282,6 @@ thread_sleep_to (int64_t end_ticks)
   list_push_back (&sleep_list, &cur->sleepelem);
   // make the current thread sleep
   thread_block();
-
 }
 
 /* Transition sleeping threads to ready-to-run status. */
@@ -283,11 +291,12 @@ thread_wakeup(int64_t curticks)
   struct list_elem *e;
 
   ASSERT (intr_get_level () == INTR_OFF);
+  struct thread *t;
 
   for (e = list_begin (&sleep_list); e != list_end (&sleep_list);
        e = list_next (e))
     {
-      struct thread *t = list_entry (e, struct thread, sleepelem);
+      t = list_entry (e, struct thread, sleepelem);
       if (t->end_ticks <= curticks)
       {
         thread_unblock(t);
@@ -422,6 +431,7 @@ thread_get_priority (void)
 void
 thread_donate_priority (struct thread *t, int new_priority)
 {
+  ASSERT(!thread_mlfqs);
   enum intr_level old_level = intr_disable();
 
   t->priority = new_priority;
@@ -442,31 +452,110 @@ thread_donate_priority (struct thread *t, int new_priority)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  thread_current()->nice = nice;
+  thread_update_priority(thread_current());
+  thread_yield();
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FP_ROUND(FP_MULT_MIX(load_avg,100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  // return FP_ROUND(FP_SUB_MIX(FP_MULT_MIX(thread_current()->recent_cpu,100),100));
+  return FP_ROUND(FP_MULT_MIX(thread_current()->recent_cpu,100));
+
+}
+
+/* Increment the recent cpu value of current thread by 1. */
+void
+thread_increment_rcpu (void)
+{
+  ASSERT(thread_mlfqs);
+  struct thread *cur=thread_current();
+  if (cur!=idle_thread)
+  {
+    cur->recent_cpu = FP_ADD_MIX(cur->recent_cpu,1);
+  }
+}
+
+/* Recalculate the recent cpu value of current thread based on load average, recent cpu and nice. */
+void
+thread_recalculate_rcpu (void)
+{
+  ASSERT (thread_mlfqs)
+  ASSERT (intr_context())
+
+  /* update load_avg once per second. */
+  struct list_elem *e;
+  struct thread *t;
+  size_t ready_run = list_size(&ready_list);
+  if (thread_current()!=idle_thread)
+  {
+    ready_run++;
+  }
+  // msg("----rr:%d",ready_run);
+  // msg("----la:%d",thread_get_load_avg());
+  load_avg= FP_DIV_MIX(FP_ADD(FP_MULT_MIX (load_avg, 59), FP_CONST (ready_run)),60);
+  /* update recent cpu*/
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  for (e = list_begin (&all_list); e != list_end (&all_list);
+       e = list_next (e))
+    {
+      t = list_entry (e, struct thread, allelem);
+      if (t!=idle_thread)
+      {
+        fixed_t load = FP_MULT_MIX (load_avg, 2);
+        fixed_t coe = FP_DIV(load,FP_ADD_MIX(load,1));
+        t->recent_cpu = FP_ADD_MIX (FP_MULT (coe, t->recent_cpu), t->nice);
+        // thread_update_priority(t);
+      }
+    }
+}
+
+/* Update thread's priority in mlfqs mode. 
+   We may update priority for thread not currently running, so we need to input a thread pointer. */
+void
+thread_update_priority (struct thread *t)
+{
+  ASSERT(thread_mlfqs);
+  if (t == idle_thread)
+    return;
+  int temp =FP_INT_PART(FP_SUB(FP_CONST(PRI_MAX), FP_ADD_MIX(FP_DIV_MIX(t->recent_cpu, 4),FP_MULT_MIX(t->nice,2))));
+  if (temp < PRI_MIN)
+    t->priority=PRI_MIN;
+  else if (temp > PRI_MAX)
+    t->priority=PRI_MAX;
+  else
+    t->priority=temp;
+  // t->priority = FP_INT_PART (FP_SUB_MIX (FP_SUB (FP_CONST (PRI_MAX), FP_DIV_MIX (t->recent_cpu, 4)), 2 * t->nice));
+  // t->priority = t->priority < PRI_MIN ? PRI_MIN : t->priority;
+  // t->priority = t->priority > PRI_MAX ? PRI_MAX : t->priority;
+}
+
+/* Update the ready threads according to their priority. */
+void
+thread_update_priority_all(void)
+{
+  thread_foreach((thread_action_func*) &thread_update_priority,NULL);
+  if (!list_empty (&ready_list))
+    {
+      list_sort(&ready_list,thread_priority_cmp,NULL);
+    }
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -542,7 +631,7 @@ is_thread (struct thread *t)
 /* Does basic initialization of T as a blocked thread named
    NAME. */
 static void
-init_thread (struct thread *t, const char *name, int priority)
+init_thread (struct thread *t, const char *name, int priority, int parent_nice)
 {
   enum intr_level old_level;
 
@@ -558,6 +647,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->initpriority = priority;
   t->magic = THREAD_MAGIC;
   t->desire_lock = NULL;
+  t->nice = parent_nice;
+  t->end_ticks = 0;
+  t->recent_cpu=0;
   list_init(&t->own_locks);
 
   old_level = intr_disable ();

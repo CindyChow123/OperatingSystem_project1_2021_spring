@@ -179,6 +179,20 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+  if (thread_mlfqs&&ticks!=0)
+  {
+    thread_increment_rcpu();
+    if (ticks%TIMER_FREQ==0)
+    {
+      thread_recalculate_rcpu();
+    }
+    else if (ticks%4==0)
+    {
+      // enum intr_level old_level = intr_disable();
+      thread_update_priority_all();
+      // intr_set_level (old_level);
+    }
+  }
   ticks++;
   thread_tick ();
   /* Wake up sleeping threads. */

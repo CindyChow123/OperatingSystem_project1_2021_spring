@@ -282,21 +282,28 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  lock->holder = NULL;
-  list_remove(&lock->lock_elem);
-  struct thread *cur = thread_current();
-  int big_pri = cur->initpriority;
-  if (!list_empty(&cur->own_locks))
+  if (!thread_mlfqs)
   {
-    int lock_priority = list_entry (list_front (&cur->own_locks), struct lock, lock_elem)->highest_prior;
-    if (lock_priority>cur->initpriority)
+    lock->holder = NULL;
+    list_remove(&lock->lock_elem);
+    struct thread *cur = thread_current();
+    int big_pri = cur->initpriority;
+    if (!list_empty(&cur->own_locks))
     {
-      big_pri = lock_priority;
+      int lock_priority = list_entry (list_front (&cur->own_locks), struct lock, lock_elem)->highest_prior;
+      if (lock_priority>cur->initpriority)
+      {
+        big_pri = lock_priority;
+      }
     }
+    thread_donate_priority(cur,big_pri);
+    sema_up (&lock->semaphore);
+    thread_yield(); // yield immediately
   }
-  thread_donate_priority(cur,big_pri);
-  sema_up (&lock->semaphore);
-  thread_yield(); // yield immediately
+  else{
+    lock->holder = NULL;
+    sema_up (&lock->semaphore);
+  }
 }
 
 /* Returns true if the current thread holds LOCK, false
