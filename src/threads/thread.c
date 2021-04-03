@@ -439,6 +439,11 @@ update_recent_cpu_all(void)
     t = list_entry(e, struct thread, allelem);
     if (t != idle_thread)
       t->recent_cpu = FP_ADD_MIX(FP_DIV( FP_MULT ( FP_MULT_MIX(load_average, 2), t->recent_cpu) , FP_ADD_MIX ( FP_MULT_MIX(load_average, 2), 1)) , t->nice);
+    // {
+    //   fixed_t load = FP_MULT_MIX(load_average,2);
+    //   fixed_t coe = FP_DIV(load,FP_ADD_MIX(load,1));
+    //   t->recent_cpu = FP_ADD_MIX(FP_MULT(coe, t->recent_cpu),t->nice);
+    // }
   }
   list_sort (&ready_list, (list_less_func *) compare_priority, NULL);
 }
