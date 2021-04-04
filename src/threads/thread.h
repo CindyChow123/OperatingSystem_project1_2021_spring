@@ -94,7 +94,7 @@ struct thread
     struct list_elem sleepelem;         /* List element for sleeping threads list. */
     int64_t end_ticks;                  /* The time when the thread wakes up. */
     struct list own_locks;              /* List of locks owned by the thread. */
-    struct lock *desire_lock;           /* Point to lock that it is aquiring. */
+    struct lock *desire_lock;           /* Point to lock that it is acquiring. */
     int nice;                           /* Nice value of the thread. */
     fixed_t recent_cpu;                 /* An estimate of the CPU time the thread has used recently. */
 
@@ -129,7 +129,7 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 void thread_block (void);
 void thread_unblock (struct thread *);
 
-void thread_sleep_to(int64_t ent_ticks);
+void thread_sleep_to(int64_t end_ticks);
 void thread_wakeup(int64_t curticks);
 
 struct thread *thread_current (void);

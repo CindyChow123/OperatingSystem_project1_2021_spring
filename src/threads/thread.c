@@ -643,13 +643,21 @@ init_thread (struct thread *t, const char *name, int priority, int parent_nice)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
-  t->initpriority = priority;
   t->magic = THREAD_MAGIC;
   t->desire_lock = NULL;
   t->nice = parent_nice;
   t->end_ticks = 0;
   t->recent_cpu=0;
+  if (!thread_mlfqs)
+  {
+    t->priority = priority;
+    t->initpriority = priority;
+  }else
+  {
+    thread_update_priority(t);
+    t->initpriority=t->priority;
+  }
+  
   list_init(&t->own_locks);
 
   old_level = intr_disable ();

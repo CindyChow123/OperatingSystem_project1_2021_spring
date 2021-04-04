@@ -228,7 +228,7 @@ lock_acquire (struct lock *lock)
       pre_lock = pre_lock->holder->desire_lock;
     }
   }
-  lock->highest_prior = cur->priority;
+  // lock->highest_prior = cur->priority;
   // list_insert_ordered(&lock->waiters,&cur->elem,(list_less_func *)&thread_priority_cmp, NULL);
   sema_down (&lock->semaphore);
 

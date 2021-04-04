@@ -179,10 +179,10 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
-  if (thread_mlfqs&&ticks!=0)
+  if (thread_mlfqs)
   {
     thread_increment_rcpu();
-    if (ticks%TIMER_FREQ==0)
+    if (ticks%TIMER_FREQ==0&&ticks!=0)
     {
       thread_recalculate_rcpu();
     }
